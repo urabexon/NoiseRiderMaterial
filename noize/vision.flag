@@ -1,0 +1,9 @@
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+    vec2 uv = fragCoord/iResolution.xy-.5;
+    uv*=iResolution.y/iResolution.x;
+    float l = length(uv);
+    uv=fract(uv*21.)*33.;
+    vec3 col = 2.8* mod(0. +l*41.1*cos(iTime*2.5+uv.xyx+vec3(0,4,6)),.5);
+    fragColor = vec4(col,1.0);
+}
