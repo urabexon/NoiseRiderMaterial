@@ -1,0 +1,49 @@
+float scale = 12.0;
+float step = 20.0;
+float BaseNoiseStrength = 0.0;
+float VariableNoiseStrength = 5.0;
+float TreeChance = 0.999;
+
+
+float NoiseAt(in vec2 p, float NoisePhase) {
+	p += NoisePhase * 7.31;
+	vec2 m = vec2(1.6, 1.2);
+	float dx = 0.0;
+	dx = 0.5000 * noise(p); p = m * p;
+	dx += 0.2500 * noise(p); p = m * p;
+	dx += 0.1250 * noise(p); p = m * p;
+	dx += 0.0625 * noise(p); p = m * p;
+	return dx;
+}
+
+// Technical
+const float Noiseyshift = 500.2319;
+vec2 ShiftAt(in vec2 Coord) {
+	vec2 p = Coord.xy * scale / 300.0;
+	return vec2(NoiseAt(p, 0.0), NoiseAt(p + Noiseyshift, 0.0));
+}
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+	vec2 FakeCoords = fragCoord / scale + iTime * 10.0;
+	vec2 ShiftXY = ShiftAt(FakeCoords);
+    
+    float noisemod = fract(iTime / 10.0);
+    noisemod = (max(noisemod, 1.0-noisemod) - 0.5)*VariableNoiseStrength*2.0;
+    
+	vec2 DistortedCoords = FakeCoords + ShiftXY * step * (BaseNoiseStrength + noisemod);
+	vec2 CellCoords = floor(DistortedCoords / step);
+
+	bool OddX = false;
+	bool OddY = false;
+	if (mod(CellCoords.x, 2.0) == 0.0) {
+		OddX = true;
+	}
+	if (mod(CellCoords.y, 2.0) == 0.0) {
+		OddY = true;
+	}
+	if (OddX != OddY) {
+		fragColor = vec4(0.7, 0.0, noisemod / 10.0, 1.0);
+	} else {
+		fragColor = vec4(0.0, 0.7, noisemod / 10.0, 1.0);
+	}
+}
