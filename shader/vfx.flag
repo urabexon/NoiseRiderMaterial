@@ -1,0 +1,138 @@
+// cosine based palette, 4 vec3 params
+//This fuction is explained here
+//https://iquilezles.org/articles/palettes/
+vec3 palette(float t)
+{
+
+    //Palette Created app
+    //http://dev.thi.ng/gradients/
+    vec3 a = vec3(0.158, 1.102, 0.468);
+    vec3 b = vec3(0.502,0.502,1.000);
+    vec3 c = vec3(0.428, 1.000, 1.008);
+    vec3 d = vec3(0.000, 0.538, 0.312);
+
+    return a + b*cos( 6.28318*(c*t+d) );
+}
+
+float sdBox( in vec2 p, in vec2 b )
+{
+    vec2 d = abs(p)-b;
+    return length(max(d,0.0)) + min(max(d.x,d.y),0.0);
+}
+
+float sdCircle( in vec2 p, in float r ) 
+{
+    return length(p)-r;
+}
+
+float sdEquilateralTriangle( in vec2 p, in float r )
+{
+    const float k = sqrt(3.0);
+    p.x = abs(p.x) - r;
+    p.y = p.y + r/k;
+    if( p.x+k*p.y>0.0 ) p = vec2(p.x-k*p.y,-k*p.x-p.y)/2.0;
+    p.x -= clamp( p.x, -2.0*r, 0.0 );
+    return -length(p)*sign(p.y);
+}
+
+float ndot(vec2 a, vec2 b ) { return a.x*b.x - a.y*b.y; }
+float sdRhombus( in vec2 p, in vec2 b ) 
+{
+    p = abs(p);
+    float h = clamp( ndot(b-2.0*p,b)/dot(b,b), -1.0, 1.0 );
+    float d = length( p-0.5*b*vec2(1.0-h,1.0+h) );
+    return d * sign( p.x*b.y + p.y*b.x - b.x*b.y );
+}
+
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+    vec2 uv = (fragCoord * 2.0 - iResolution.xy) / iResolution.y;
+    vec2 uv0 = uv;
+    vec2 uv2 = uv;
+    vec2 uv3 = uv;
+    vec2 uv4 = uv;
+    
+    vec3 finalColor = vec3(0.0);
+    vec3 mask = vec3(0.0);
+
+    uv = fract(uv * 1.) - 0.5;
+    vec3 col;
+    float size = .5;
+    float sizeB = .8;
+    float f = 0.;
+    float d = 0.;
+    float sq = abs(sin(sizeB + iTime*.3)/2.5);
+    
+    float bounds = sdBox(uv0,vec2(sizeB,sizeB));
+    //bounds = (pow(.02/ bounds, 1.));
+    //bounds = abs(bounds);
+    bounds = smoothstep(0.05,0.,bounds);
+    //inverts the colors
+    //bounds = .02/bounds;
+    
+    
+    for(float i = 0.0; i < 4.0; i++)
+    {
+        uv = fract(uv * 1.4) - 0.5;
+        uv2 = fract(uv2 *2.) - 0.5;
+        uv2.x = fract(uv2.x -(iTime*.1)) - 0.5;
+        uv3 = fract(uv3 *1.-(iTime*.1)) - 0.5;
+        
+        uv4 = fract(uv4 * .5) - 0.5;
+        
+        float d = sdBox(uv,vec2(.1,.1));
+        float f = sdBox(uv3,vec2(size,size));
+        float e = sdBox(uv0,vec2(size-.2,size-.2));
+        
+        float y = sdBox(uv3,vec2(sq,sq));
+        float z = sdBox(uv4,vec2(sq,sq));
+        
+        
+        z = abs(z);
+        z = smoothstep(0.,.1,z);
+        z = (.02/z);
+        
+        y = abs(y);
+        y = smoothstep(0.,.1,y);
+        y = .005/y;
+        
+        d += length(d) * exp(length(uv0));
+        //f += length(uv*.25) * exp(length(uv0));
+        
+        e += length(f) * exp(length(uv0));
+        e += d* exp(length(uv0));
+        
+        f = length(f);
+        
+        float tri = sdEquilateralTriangle(uv0,.7);
+        float di = sdRhombus(uv0,vec2(sq*2.,sq*2.));
+        
+        di = abs(di);
+        di = smoothstep(0.,.1,di);
+        di = .01/di;
+        
+        d = sin(d*6. + iTime)/3.;
+        d = abs(d);
+        d = pow(0.06 / d, 1.0);
+        
+        float g =(pow(0.03/ f, 2.));
+        f = asin(pow(0.01/ f, 1.));
+        //f = exp(f);
+        
+        e = (pow(0.03/ e, 1.));
+
+        vec3 col = palette(length(uv0) + iTime*.5);
+        //col -= palette(length(z));
+       
+
+        float final = (.01/(d/z)+di);
+        //float final = z;
+       
+        mask += final;
+        finalColor += (col* final)*bounds;
+    }
+    
+  
+    //fragColor = vec4(mask,1.0);
+    fragColor = vec4(finalColor,1.0);
+}
