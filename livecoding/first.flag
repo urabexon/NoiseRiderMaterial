@@ -1,0 +1,177 @@
+const float pi = acos(-1.);
+const float pi2 = pi * 2.;
+const float bpm = 120.;
+
+mat2 rot(float a)
+{
+    float s = sin(a), c = cos(a);
+    return mat2(c, s, -s, c);
+}
+
+float sdSphere(vec3 p, float r){
+    return length(p) - r;
+}
+
+float sdBox(vec3 p, vec3 s) {
+    vec3 d = abs(p) - s;
+    return min(max(max(d.x, d.y), d.z), 0.0) + length(max(d, 0.0));
+ }
+
+// From Saina's work
+// See: https://www.shadertoy.com/view/3XXXRH
+vec3 twist(vec3 p, float power){
+    float s = sin(power * p.z);
+    float c = cos(power * p.z);
+    mat3 m = mat3(
+          c,   s, 0.0,
+         -s,   c, 0.0,
+        0.0, 0.0, 1.0
+    );
+    return m * p;
+}
+
+vec2 pmod(vec2 p, float r) {
+    float a = atan(p.x, p.y) + pi / r;
+    float n = pi2 / r;
+    a = floor(a / n) * n;
+
+    return p * rot(-a);
+}
+
+// From butadiene's work
+// See: https://butadiene.fanbox.cc/posts/912423
+vec2 bpmod(vec2 p, float n){
+    float np = pi2 / n;
+    float r = atan(p.x,p.y) - .5 * np;
+    r = mod(r,np) - .5 * np;
+    
+    return length(p) * vec2(cos(r),sin(r));
+}
+
+float murasakiTwist(vec3 p, float tr, float time){
+    p = twist(p, sin(time * .3) * .15);
+    const int ITER = 4;
+    float a = .8;
+    p.xy = pmod(p.xy,12.);
+    p.z += time * 2.;
+    p = mod(p,a) - a *.5;
+    for(int i=0; i<4;i++){
+        p = abs(p) - .4;
+        p.xz *= rot(sin(time * .8) * .25);
+    }
+
+    return sdBox(p,vec3(.1,.5,.1));
+}
+
+float juji(vec3 p,float time){
+    vec3 q = (p);
+    q.z += time * .1;
+    float a = .25;
+    q = mod(q,a) - .5 * a;
+    float t = .01;
+    float hutosa = .00001;
+    float dx = sdBox(q, vec3(t,hutosa,hutosa));
+    float dy = sdBox(q, vec3(hutosa,t,hutosa));
+    float dz = sdBox(q, vec3(hutosa,hutosa,t));
+    
+    return min(dx,min(dy,dz));
+}
+
+float renkon(vec3 p, float tr){
+    const int ITER = 12;
+    p.z += tr * 5.;
+    float a = 7.1;
+    p = mod(p, a) - 0.5 * a;
+
+    for(int i=0;i<12;i++){
+        p = abs(p) - .2;
+        p.xy *= rot(pi * .25);
+        p.xz *= rot(tr);
+    }
+
+  return sdBox(p,vec3(.1,.5,.1));
+}
+
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+    float time = iTime;
+    vec2 uv = fragCoord/iResolution.xy;
+    vec2 asp = iResolution.xy / min(iResolution.x,iResolution.y);
+    
+    vec2 suv = (uv * 2. - 1.) * asp;
+    
+    vec3 col = vec3(suv,0.);
+    
+      float elapsedTime = time * (bpm / 60.);
+      float beat = floor(elapsedTime); // 0,1,2,3,4,5,6,.....
+      float bar = mod(beat,4.); // 0,1,2,3,0,1,2,3,0,.....
+
+      // From Renard's work
+      // See: https://www.shadertoy.com/view/cltcWM
+      float tr = pow(fract(elapsedTime), .3);
+
+      float radius = .2;
+      float phi = time * .2;
+
+      vec3 ro = vec3(0.,0.,-5. * 1.);
+      vec3 ta = vec3(0.);
+      if(int(beat) % 4 == 0 || int(beat) % 4 == 1){
+          ro = vec3(cos(phi) * radius, 0., sin(phi) * radius);
+      }
+      
+      vec3 cdir = normalize(ta-ro);
+      vec3 side = cross(cdir, vec3(0.,1.,0.));
+      vec3 up = cross(side,cdir);
+      float fov = .6;
+      
+      vec3 ray = normalize(suv.x*side+suv.y*up+cdir*fov);
+
+      float t = .001;
+      col = vec3(0.);
+      
+        for(int i=0;i<99;i++){
+            vec3 pos = ro + ray * t;
+            float d;
+            if(int(beat) % 4 == 0){
+                d = renkon(pos, tr);
+                d = min(juji(pos,time),d);
+            }else if (int(beat) % 4 == 1){
+                d = renkon(pos, tr);
+            }else if (int(beat) % 4 == 2){
+                d = murasakiTwist(pos,tr,time);
+                d = min(juji(pos,time),d);
+            }else if (int(beat) % 4 == 3){
+                d = murasakiTwist(pos,tr,time);
+            }
+            
+        if(d < 0.001){
+            col = vec3(1.) - float(i)/99.;
+            break;
+        }
+            t += d;
+    }
+  
+    vec2 pp = suv;
+
+    pp *= rot(tr);
+
+    pp = bpmod(pp,bar * 1. + 2.) - time * .3;
+
+
+    float kx = .25;
+    pp = mod(pp,kx) - kx * .5;
+
+    float c = 0.005 / abs(pp.x - .1);
+
+
+    col += vec3(.6) * exp(-2. * fract(elapsedTime));
+
+    col *= exp(-.01 * t);
+
+
+    col += vec3(1., .5,.5) * c * (1. - tr) * 5.;
+
+    col*=smoothstep(.8,.5,length(uv-.5));
+
+    fragColor = vec4(col,1.0);
+}
