@@ -1,0 +1,1030 @@
+#define PI 3.14159265
+#define TWO_PI 6.2831853
+#define rgr RodriguesRotation
+#define rgra RodriguesRotationAround
+
+#define OO vec2(0.0, 0.0)
+#define IO vec2(1.0, 0.0)
+#define OI vec2(0.0, 1.0)
+#define II vec2(1.0, 1.0)
+#define JO vec2(-1.0, 0.0)
+#define OJ vec2(0.0, -1.0)
+#define JJ vec2(-1.0, -1.0)
+#define IJ vec2(1.0, -1.0)
+#define JI vec2(-1.0, 1.0)
+#define OOO vec3(0.0, 0.0, 0.0)
+#define IOO vec3(1.0, 0.0, 0.0)
+#define OIO vec3(0.0, 1.0, 0.0)
+#define OOI vec3(0.0, 0.0, 1.0)
+#define IOI vec3(1.0, 0.0, 1.0)
+#define IIO vec3(1.0, 1.0, 0.0)
+#define OII vec3(0.0, 1.0, 1.0)
+#define III vec3(1.0, 1.0, 1.0)
+#define JOO vec3(-1.0, 0.0, 0.0)
+#define OJO vec3(0.0, -1.0, 0.0)
+#define OOJ vec3(0.0, 0.0, -1.0)
+#define JJO vec3(-1.0, -1.0, 0.0)
+#define JOJ vec3(-1.0, 0.0, -1.0)
+#define OJJ vec3(0.0, -1.0, -1.0)
+#define JJJ vec3(-1.0, -1.0, -1.0)
+#define IJJ vec3(1.0, -1.0, -1.0)
+#define JIJ vec3(-1.0, 1.0, -1.0)
+#define JJI vec3(-1.0, -1.0, 1.0)
+#define IIJ vec3(1.0, 1.0, -1.0)
+#define IJI vec3(1.0, -1.0, 1.0)
+#define JII vec3(-1.0, 1.0, 1.0)
+#define IOJ vec3(1.0, 0.0, -1.0)
+#define JIO vec3(-1.0, 1.0, 0.0)
+#define IJO vec3(1.0, -1.0, 0.0)
+
+
+// Begin Calc Funcs
+
+float signedPow(float x, float a){
+    return pow(abs(x),a)*sign(x);
+}
+
+vec3 RodriguesRotation(vec3 original, vec3 axis,  float radian) {
+    axis = normalize(axis);
+    float cos_t = cos(radian);
+    float sin_t = sin(radian);
+
+    vec3 cross_av = cross(axis, original);
+
+    vec3 term1 = original * cos_t;
+    vec3 term2 = cross_av * sin_t;
+    vec3 term3 = axis * dot(axis, original) * (1.0 - cos_t);
+
+    vec3 rotated_vector = term1 + term2 + term3;
+
+    return rotated_vector;
+}
+
+vec3 RodriguesRotationAround(vec3 target,  vec3 axis, float radian, vec3 center) {
+    vec3 translated = target - center;
+    vec3 rotated = RodriguesRotation(translated, axis, radian);
+    return rotated + center;
+}
+
+
+
+// Begin SDF
+
+float sdBox( vec3 p, vec3 halfSize )
+{
+    vec3 q = abs(p) - halfSize;
+    return length(max(q,0.0)) + min(max(q.x,max(q.y,q.z)),0.0);
+}
+
+vec3 normalSdBox(vec3 p, vec3 halfSize )
+{
+    vec3 ratio = abs(p)/halfSize;
+    return ratio.x > ratio.y ?
+    (ratio.x > ratio.z ? vec3(sign(p.x), 0., 0.) : vec3(0., 0., sign(p.z))) :
+    (ratio.y > ratio.z ? vec3(0., sign(p.y), 0.0) : vec3(0., 0., sign(p.z)));
+
+}
+
+float sdSphere( vec3 p, float s )
+{
+    return length(p)-s;
+}
+
+float sdCappedCylinder( vec3 p, vec3 a, vec3 b, float r )
+{
+    vec3  ba = b - a;
+    vec3  pa = p - a;
+    float baba = dot(ba,ba);
+    float paba = dot(pa,ba);
+    float x = length(pa*baba-ba*paba) - r*baba;
+    float y = abs(paba-baba*0.5)-baba*0.5;
+    float x2 = x*x;
+    float y2 = y*y*baba;
+    float d = (max(x,y)<0.0)?-min(x2,y2):(((x>0.0)?x2:0.0)+((y>0.0)?y2:0.0));
+    return sign(d)*sqrt(abs(d))/baba;
+}
+
+float sdVesicaSegment( in vec3 p, in vec3 a, in vec3 b, in float w )
+{
+    vec3  c = (a+b)*0.5;
+    float l = length(b-a);
+    vec3  v = (b-a)/l;
+    float y = dot(p-c,v);
+    vec2  q = vec2(length(p-c-y*v),abs(y));
+
+    float r = 0.5*l;
+    float d = 0.5*(r*r-w*w)/w;
+    vec3  h = (r*q.x<d*(q.y-r)) ? vec3(0.0,r,0.0) : vec3(-d,0.0,d+w);
+
+    return length(q-h.xy) - h.z;
+}
+
+
+float smin( float d1, float d2, float k )
+{
+    k *= 4.0;
+    float h = max(k-abs(d1-d2),0.0);
+    return min(d1, d2) - h*h*0.25/k;
+}
+
+// End SDF
+
+
+
+// Begin Hash
+
+uint rng_state;
+
+uint PCGHashFree()
+{
+    rng_state = rng_state * 747796405u + 2891336453u;
+    uint state = rng_state;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+uint pcgHash(uint x) {
+    uint state = (x * 0x2C9277B5u) + 0xAC564B05u,
+    word  = ((state >> ((state >> 28) + 4u)) ^ state) * 0x108EF2D9u;
+    return word ^ (word >> 22);
+}
+
+uint pcgHash(uint x, uint y) {
+    return pcgHash(pcgHash(y) + x);
+}
+
+uint pcgHash(uint x, uint y, uint z) {
+    return pcgHash(pcgHash(y, z) + x);
+}
+
+float randPcg(float seed)
+{
+    return float(pcgHash(floatBitsToUint(seed))) / 4294967295.0;
+}
+float randPcg(vec2 seed)
+{
+    return float(pcgHash(floatBitsToUint(seed.x), floatBitsToUint(seed.y))) / 4294967295.0;
+}
+float randPcg(vec3 seed)
+{
+    return float(pcgHash(floatBitsToUint(seed.x), floatBitsToUint(seed.y), floatBitsToUint(seed.z))) / 4294967295.0;
+}
+
+vec3 rPcg3to3(vec3 seed){
+    float r0 = randPcg(seed);
+    float r1 = randPcg(r0);
+    float r2 = randPcg(r1);
+    return vec3(r0,r1,r2);
+}
+
+// End Hash
+
+// Begin Noise
+
+
+const mat3 m4fbm = mat3( 0.00,  0.80,  0.60,
+-0.80,  0.36, -0.48,
+-0.60, -0.48,  0.64 );
+
+float SinNoise(vec3 p){
+    float res= sin(p.x*1.213)*sin(p.y*0.887)*sin(p.z*0.976);
+    p = m4fbm*p*1.8;
+    res += sin(p.x*1.013)*sin(p.y*1.287)*sin(p.z*0.876);
+    res *= 0.5;
+    res = signedPow(res, 0.3);
+    res = res*0.5 + 0.5;
+    return res;
+}
+
+float noiseK(vec3 st)
+{
+    vec3 ip = floor(st);
+    vec3 fp = smoothstep(vec3(0.), vec3(1.), fract(st));
+
+    vec4 a = vec4(randPcg(ip+vec3(0.)),randPcg(ip+vec3(1.,0.,0.)),randPcg(ip+vec3(0.,1.,0.)),randPcg(ip+vec3(1.,1.,0.)));
+    vec4 b = vec4(randPcg(ip+vec3(0.,0.,1.)),randPcg(ip+vec3(1.,0.,1.)),randPcg(ip+vec3(0.,1.,1.)),randPcg(ip+vec3(1.,1.,1.)));
+
+    a = mix(a, b, fp.z);
+    a.xy = mix(a.xy, a.zw, fp.y);
+
+    return mix(a.x, a.y, fp.x);
+}
+
+float fbm( vec3 p )
+{
+    float f;
+    f  = 0.5000*noiseK( p ); p = m4fbm*p*2.02;
+    f += 0.2500*noiseK( p ); p = m4fbm*p*2.03;
+    f += 0.1250*noiseK( p );
+    return f;
+}
+
+// End Noise
+
+vec3 OrthoProj(vec3 projectee, vec3 dir){
+    return dot(projectee,dir)/dot(dir,dir)*dir;
+}
+
+////////////////////////////////
+////////////////////////////////
+////////////////////////////////
+////////////////////////////////
+////////////////////////////////
+
+
+struct LoopParams{
+    int maxSteps;
+    float maxDistance;
+    float epsilon;
+    float degreeFov;
+};
+
+struct CameraInfo{
+    vec3 pos;
+    vec3 dir;
+    vec3 u;
+    vec3 v;
+};
+
+struct RayResult{
+    vec3 pos;
+    vec3 dir;
+    bool hit;
+    vec4 colAcc;
+};
+
+struct SdfResult{
+    float dist;
+    vec3 boundCenter;
+    vec3 boundSize;
+    vec4 col;
+    int hitState;
+    vec3 normal;
+};
+
+
+// Loop Info End
+
+////////
+
+
+struct SegmentInTree{
+    int topoType;
+    bool isNega;
+    int rotHor;
+    ivec3 gridSize;
+    vec3 boundMin;
+    vec3 boundSize;
+    int len;
+};
+
+SegmentInTree c_SIT(int tt,bool ine, int rh, ivec3 gs, vec3 bmin, vec3 bs, int len){
+    SegmentInTree res;
+    res.topoType = tt;
+    res.isNega = ine;
+    res.rotHor = rh;
+    res.gridSize = gs;
+    res.boundMin = bmin;
+    res.boundSize = bs;
+    res.len = len;
+    return res;
+}
+
+SegmentInTree dummy_SIT(){
+    SegmentInTree sit;
+    return sit;
+}
+
+int addmod4(SegmentInTree sit, int x){
+    return (sit.rotHor + x) % 4;
+}
+
+/*
+    テーブル形式：
+    ivec3(topoType, negaMode, rotOffset)
+
+    topoType : 0..5 （0 は「そのまま topo=0, isNega=false, rotHor=0」のデフォルト）
+    negaMode : 0 = false 固定, 1 = sit.isNega, 2 = !sit.isNega
+    rotOffset: rotHor = addmod4(sit, rotOffset) で使用（0 なら rotHor = sit.rotHor）
+*/
+
+const ivec3 DECOMP_TABLE0A[27] = ivec3[27](
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0));
+
+
+const ivec3 DECOMP_TABLE0B[27] = ivec3[27](
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(2, 2, 1),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(3, 1, 1),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(2, 1, 3),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(1, 2, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(1, 1, 0),
+ivec3(4, 2, 0),ivec3(3, 1, 0),ivec3(5, 2, 2),
+ivec3(3, 1, 3),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(4, 2, 3),ivec3(3, 1, 2),ivec3(5, 1, 2)
+);
+
+// ---- DECOMP_TABLE1 ----
+const ivec3 DECOMP_TABLE1A[27] = ivec3[27](
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(1, 1, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(1, 1, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(1, 1, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0)
+);
+
+const ivec3 DECOMP_TABLE1B[27] = ivec3[27](
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(5, 1, 0), ivec3(2, 1, 2),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(1, 1, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(2, 1, 0), ivec3(5, 1, 2),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0)
+);
+
+// ---- DECOMP_TABLE2 ----
+const ivec3 DECOMP_TABLE2A[27] = ivec3[27](
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),//
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(2, 1, 0),ivec3(3, 1, 2),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),//
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(1, 1, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0));
+
+const ivec3 DECOMP_TABLE2B[27] = ivec3[27](
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(2, 1, 0), ivec3(4, 1, 1),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(4, 2, 3),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(5, 1, 1), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(2, 1, 3), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0)
+);
+
+// ---- DECOMP_TABLE3 ----
+const ivec3 DECOMP_TABLE3A[27] = ivec3[27](
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),//
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(3, 1, 0),ivec3(3, 1, 0),ivec3(3, 1, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),//
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0));
+
+const ivec3 DECOMP_TABLE3B[27] = ivec3[27](
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(3, 1, 0), ivec3(2, 1, 2), ivec3(2, 2, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(5, 1, 0), ivec3(5, 2, 2),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0)
+);
+
+const ivec3 DECOMP_TABLE4A[27] = ivec3[27](
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),//
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(4, 1, 0),ivec3(3, 1, 2),
+ivec3(0, 0, 0),ivec3(3, 1, 1),ivec3(0, 0, 0),//
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0));
+
+const ivec3 DECOMP_TABLE4B[27] = ivec3[27](
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(2, 1, 0),
+ivec3(0, 0, 0), ivec3(2, 2, 1), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(5, 1, 1),
+ivec3(0, 0, 0), ivec3(5, 2, 0), ivec3(4, 2, 2)
+);
+
+const ivec3 DECOMP_TABLE5A[27] = ivec3[27](
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(1, 1, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),//
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(5, 1, 0),ivec3(3, 1, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),//
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0),
+ivec3(0, 0, 0),ivec3(0, 0, 0),ivec3(0, 0, 0));
+
+const ivec3 DECOMP_TABLE5B[27] = ivec3[27](
+ivec3(2, 1, 0), ivec3(4, 1, 1), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(5, 1, 3), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),//
+ivec3(1, 1, 0), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(4, 2, 0),
+ivec3(0, 0, 0), ivec3(0, 0, 0), ivec3(2, 2, 3),//
+ivec3(5, 1, 1), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(3, 1, 1), ivec3(0, 0, 0), ivec3(0, 0, 0),
+ivec3(4, 1, 3), ivec3(3, 1, 0), ivec3(5, 2, 2)
+);
+
+const int ROTATE_1REC[9] = int[9](6,3,0, 7,4,1, 8,5,2);
+const int ROTATE_2REC[9] = int[9](8,7,6, 5,4,3, 2,1,0);
+const int ROTATE_3REC[9] = int[9](2,5,8, 1,4,7, 0,3,6);
+
+vec3 PosIdentity(SegmentInTree sit){
+    return sit.boundMin + sit.boundSize * 0.666666;
+}
+
+// 共通 Decompose 関数（テーブル駆動）
+SegmentInTree DecomposeSegment(SegmentInTree sit, ivec3 loc, int times, int level) {
+    int id = loc.x + loc.y*9 + loc.z*3;
+    if(sit.rotHor == 1){
+        id = ROTATE_1REC[id%9] + (id/9)*9;
+    }else if(sit.rotHor == 2){
+        id = ROTATE_2REC[id%9] + (id/9)*9;
+    }else if(sit.rotHor == 3){
+        id = ROTATE_3REC[id%9] + (id/9)*9;
+    }
+
+    ivec3 gs = sit.gridSize;
+    vec3  bmin = sit.boundMin;
+    vec3  bs   = sit.boundSize;
+
+    ivec3 cellGS   = ivec3(gs.x/3, gs.y/3, gs.z/3);
+    vec3  cellMin  = bmin + vec3(loc)*bs/3.0;
+    vec3  cellSize = bs/3.0;
+
+    // デフォルト（topoType=0, isNega=false）
+    SegmentInTree res = c_SIT(0, false, sit.rotHor, cellGS, cellMin, cellSize, 0);
+
+    ivec3 entry;
+    if      (sit.topoType == 0) entry = DECOMP_TABLE0B[id];
+    else if (sit.topoType == 1) entry = (randPcg(PosIdentity(sit)) < 0.5) ? DECOMP_TABLE1A[id] : DECOMP_TABLE1B[id];
+    else if (sit.topoType == 2) entry = (randPcg(PosIdentity(sit)) < 0.5) ? DECOMP_TABLE2A[id] : DECOMP_TABLE2B[id];
+    else if (sit.topoType == 3) entry = (randPcg(PosIdentity(sit)) < 0.5) ? DECOMP_TABLE3A[id] : DECOMP_TABLE3B[id];
+    else if (sit.topoType == 4) entry = (randPcg(PosIdentity(sit)) < 0.5) ? DECOMP_TABLE4A[id] : DECOMP_TABLE4B[id];
+    else                        entry = (randPcg(PosIdentity(sit)) < 0.5) ? DECOMP_TABLE5A[id] : DECOMP_TABLE5B[id];
+
+    int newTopo   = entry.x;
+    int negaMode  = entry.y;
+    int rotOffset = entry.z;
+
+    // (0,0,0) は変更なし
+    if (newTopo != 0 || negaMode != 0 || rotOffset != 0) {
+        if (newTopo != 0) {
+            res.topoType = newTopo;
+        }
+        if (negaMode == 1) {
+            res.isNega = sit.isNega;
+        } else if (negaMode == 2) {
+            res.isNega = !sit.isNega;
+        }
+        // rotHor は topoType!=0 のときは sit をベースに addmod4
+        // rotOffset==0 なら addmod4(sit,0) = sit.rotHor
+        res.rotHor = addmod4(sit, rotOffset);
+    }
+
+    return res;
+}
+
+const int NUMDIV3[20] = int[20](1,3,9,27,81,243,729,2187,6561,19683,59049,177147,531441,1594323,4782969,14348907,43046721,129140163,387420489,1162261467);
+
+
+SegmentInTree SmallestSegment(vec3 pos){
+    int timesDiv = 4;
+    ivec3 initGS = ivec3(1,1,1) * NUMDIV3[timesDiv];
+
+    vec3 currSize = vec3(initGS)*1.0;
+    vec3 currMin  = floor(pos/currSize)*currSize;
+    vec3 currMax  = currMin + currSize;
+
+    SegmentInTree initSit = c_SIT(5, false, 1, initGS, currMin, currSize, 0);
+    SegmentInTree currSit = initSit;
+
+    for (int i = 0; i < timesDiv; i++) {
+        if(currSit.topoType==0){
+            if(randPcg(PosIdentity(currSit))<1.0 - pow(0.8, float(i*3+1)) && i != 0){
+                break;
+            }
+        }
+        vec3  diff = pos - currSit.boundMin;
+        vec3  idx  = diff / currSit.boundSize * 3.0;
+        ivec3 loc  = ivec3(int(floor(idx.x) + 0.1),
+        int(floor(idx.y) + 0.1),
+        int(floor(idx.z) + 0.1));
+
+        // topoType に応じてテーブルから一発
+        currSit = DecomposeSegment(currSit, loc, i, timesDiv - i - 1);
+    }
+
+    return currSit;
+}
+
+
+
+////////
+
+
+
+SdfResult Dummy_sdfr(){
+    SdfResult res;
+    res.dist=1.0;
+    return res;
+}
+
+SdfResult CompareSr2(SdfResult a, SdfResult b){
+    bool isa = (a.dist < b.dist);
+    if(isa) return a;
+    else return b;
+}
+
+SdfResult CompareSr3(SdfResult a, SdfResult b, SdfResult c){
+    return CompareSr2(CompareSr2(a,b), c);
+}
+
+SdfResult CompareSr4(SdfResult a, SdfResult b, SdfResult c, SdfResult d){
+    return CompareSr2(CompareSr2(a,b), CompareSr2(c,d));
+}
+
+SdfResult IntersectSr(SdfResult a, SdfResult b){
+    SdfResult res = a;
+    res.dist = max(a.dist, b.dist);
+    if(b.dist>a.dist){
+        res.col = b.col;
+        res.hitState = b.hitState;
+        res.normal = b.normal;
+    }
+    return res;
+}
+
+SdfResult Dish(vec3 cp, vec3 size){
+    SdfResult res;
+    res.dist = sdCappedCylinder( cp - vec3(0.0, dot(cp.xz,cp.xz)*0.5, 0.0), vec3(0.0,-0.01,0.0), vec3(0.0,0.01,0.0), size.x*0.6 ) - 0.01;
+    res.col.xyz = length(cp.xz) > 0.3 ? vec3(0.95, 0.6, 0.6) : vec3(0.6,0.6,0.6);
+    res.col.xyz *= clamp(80. * (cp.x*cp.x * 0.15 + cp.z*cp.z), 0.2, 1.0);
+    res.col.w = 0.65;
+    res.normal = vec3(0.0,1.0,0.0);
+    res.hitState = 1;
+    if(cp.y < dot(cp.xz,cp.xz)*0.5) res.col.xyz = vec3(0.7, 0.5, 0.5);
+    return res;
+}
+
+vec3 RotHorRect(vec3 v, int times){
+    v = times%2==1 ? vec3(-v.z, v.y, v.x) : v;
+    v = times>=2 ? vec3(-v.x, v.y, -v.z) : v;
+    return v;
+}
+
+SdfResult sdSushi(vec3 cp, vec3 size){
+    SdfResult res;
+    vec3 uvw = (cp) / size + 0.5;
+    // divide with 30x30x30 grid
+    float  numDivideRice = 15.0;
+    vec3 idxGrid = floor(uvw * numDivideRice);
+    vec3 uvwInGrid = (uvw * numDivideRice) - idxGrid;
+    vec3 centerInGrid = (idxGrid + 0.5) / numDivideRice;
+    vec3 riceGridSize = vec3(1.0/numDivideRice);
+    vec3 eachRandAxis = vec3(
+    randPcg(idxGrid.xy + vec2(12.34, 56.78)),
+    randPcg(idxGrid.yz + vec2(34.56, 78.90)),
+    randPcg(idxGrid.zx + vec2(90.12, 34.56))
+    );
+    float eachRandAmountRot = randPcg(idxGrid + vec3(11.11, 22.22, 33.33)) * PI * 0.1;
+    vec3 rotatedPosInGrid = rgr(uvwInGrid - 0.5, vec3(0.0,1.0,0.0), eachRandAmountRot) + 0.5;
+
+    float distEachRice = sdVesicaSegment( rotatedPosInGrid, vec3(-0.3,0.5,0.5),vec3(1.3,0.5,0.5) ,0.6 )/numDivideRice;
+
+    float riceDist = sdBox(cp - vec3(0.0, -0.13, 0.0), size * vec3(0.32, 0.07, 0.08))-0.04;
+    riceDist += sin(uvw.x*30.) * sin(uvw.y*30.) * sin(uvw.z*30.) * 0.006;
+    float centerFishY = -0.06 + uvw.x*(1.0-uvw.x)*0.15 + uvw.z*(1.0-uvw.z)*0.1;
+    float fishDist = sdBox(cp - vec3(0.0, centerFishY, 0.0), size * vec3(0.43, 0.03, 0.11)) - 0.02 - 0.012*SinNoise(30.*cp*vec3(1.,0.,1.));
+    bool isEgg = false;
+    if(riceDist - 0.04 < fishDist){
+        res.dist = min(riceDist, fishDist);
+        if(riceDist<fishDist){
+            res.col = vec4(1.0,1.0,1.0, 1.0);
+        }
+        else{
+            isEgg = true;
+        }
+        if(riceDist<0.01){
+            isEgg = false;
+            res.dist = distEachRice;
+            vec3 va = uvwInGrid-vec3(0.5);
+            vec3 vb = vec3(0.5)-centerInGrid;
+            float facingCenter = dot(normalize(va), normalize(vb)) * 0.5 + 0.5;
+            facingCenter += sin(uvw.x*30.) * sin(uvw.y*30.) * sin(uvw.z*30.) * 0.3;
+            float facingOuter = 1.0 - facingCenter;
+            facingOuter += 0.7;
+            facingOuter = clamp(facingOuter, 0.0, 1.0);
+            res.col = facingOuter * vec4(1.0,1.0,1.0, 1.0) + vec4(0.6,0.6,0.6,1.0) * (1.0 - facingOuter);
+        }
+    }
+    else{
+        res.dist = min(riceDist, fishDist);
+        isEgg = true;
+    }
+
+    if(isEgg){
+        float val = mod(pow(pow(abs(uvw.x-0.5),4.0) + pow(abs(uvw.z-0.5)*3.0,4.0), 0.25)*10.0,1.0);
+        float thre = 0.25 + 0.2 * sin(30.*atan(uvw.x,uvw.z*3.));
+        res.col = cp.y > centerFishY + 0.03 ?
+        (val>thre ? vec4(1.0,0.85,0.0, 1.0) : val > thre-0.15 ? vec4(0.85,0.7,0.0,1.0) : vec4(0.90,0.88,0.86,1.0)):
+        vec4(0.88,0.74,0.0, 1.0) * (0.92+(sin(uvw.x*10.) * sin(centerFishY*350.-uvw.y*150. + uvw.x*9.)
+        * sin(uvw.z*12. + uvw.x*21. + uvw.y*14.) < -0.3 ? 0.0:0.08));
+    }
+
+    res.col = abs(uvw.x  - 0.5) < 0.1 ? vec4(0., 0., 0.0, 1.0) : res.col;
+
+    res = CompareSr2(res, Dish(cp - vec3(0.0, -0.27, 0.0), size));
+
+    return res;
+}
+
+SdfResult sdPillars(vec3 cp, vec3 size, int nDiv, int rotHor){
+    SdfResult res;
+
+    float anglePos = atan(cp.z, cp.x);
+    float nearestPillarAngleLower = floor(anglePos/(TWO_PI/float(nDiv))) * (TWO_PI/float(nDiv));
+    float nearestPillarAngleUpper = TWO_PI/float(nDiv) + nearestPillarAngleLower;
+    float pillarAngle = (nearestPillarAngleLower + nearestPillarAngleUpper) * 0.5;
+    vec3 pillarCenter = vec3(cos(pillarAngle), 0.0, sin(pillarAngle)) * 0.4;
+    float pillarDist = sdBox(cp - pillarCenter, size * vec3(0.02, 0.5, 0.02));
+
+    res.dist = pillarDist;
+    res.hitState = 1;
+    res.normal = normalSdBox(cp - pillarCenter, size * vec3(0.02, 0.5, 0.02));
+    res.normal = rgr(res.normal, vec3(0.0,1.0,0.0), float(rotHor) * (PI/-2.0));
+    res.col = vec4(0.3,0.3,0.35, 0.6);
+
+    return res;
+}
+
+SdfResult sdStraight(vec3 cp, vec3 size, int rotHor){
+    SdfResult res;
+    res.dist = sdBox(cp ,size);
+    res.normal = normalSdBox(cp ,size);
+    res.normal = rgr(res.normal, vec3(0.0,1.0,0.0), float(rotHor) * (PI/-2.0));
+    res.hitState = 1;
+    res.col = abs(res.normal.y) > 0.5 ? vec4(0.3,0.3,0.35, 0.6) : vec4(0.2,0.2,0.25, 0.5);
+    return res;
+
+}
+
+
+SdfResult sdTopo1(vec3 p, vec3 center, vec3 size, int rotHor, bool isNega, float t){
+    SdfResult res;
+    res.dist = 1.0e5;
+    vec4 myColor = vec4(1.0,0.0,0.0, 1.0);
+    p = rgra(p, vec3(0.0,1.0,0.0), float(rotHor) * (PI/2.0), center);
+
+    float phase = mod(t,1.0);
+    phase = isNega ? 1.0-phase : phase;
+
+    // building
+    res = CompareSr2(res, sdPillars(p - center, size, 12, rotHor));
+
+    // sushi dishes
+    vec3 centerBox0 = center + vec3(0.0, -0.5, 0.0) + phase*vec3(0.0, 1.0, 0.0);
+    vec3 centerBox1 = phase<0.5 ? center + vec3(0.0, +0.5, 0.0) + phase*vec3(0.0, 1.0, 0.0):
+    center + vec3(0.0, -1.5, 0.0) + phase*vec3(0.0, 1.0, 0.0);
+
+    SdfResult srSushi0 = sdSushi( rgr(p - centerBox0, vec3(0.0,1.0,0.0), float(rotHor) * (PI/-2.0)), size*vec3(0.6));
+    SdfResult srSushi1 = sdSushi( rgr(p - centerBox1, vec3(0.0,1.0,0.0), float(rotHor) * (PI/-2.0)), size*vec3(0.6));
+
+
+    res = CompareSr3(res, srSushi0, srSushi1);
+    return res;
+}
+
+SdfResult sdTopo2(vec3 p, vec3 center, vec3 size, int rotHor, bool isNega, float t){
+    SdfResult res;
+    res.dist = 1.0e5;
+    vec4 myColor = vec4(0.0,1.0,0.0, 1.0);
+    vec3 po = p;
+    p = rgra(p, vec3(0.0,1.0,0.0), float(rotHor) * (PI/2.0), center);
+    vec3 uvw = (p - center) / size + 0.5;
+
+    float phase = mod(t,1.0);
+    phase = isNega ? 1.0-phase : phase;
+
+    // building
+    res = CompareSr2(res, sdPillars(p - center, size, 12, rotHor));
+    SdfResult removing;
+    removing.dist = sdBox(p - (center + vec3(-0.25,0.1,0.)), size * vec3(0.25, 0.4, 0.5));
+    removing.hitState = 1;
+    removing.col = vec4(0.3,0.3,0.35, 0.6);
+    removing.normal = RotHorRect(vec3(0.0,-1.0,0.0), -rotHor);
+    res = IntersectSr(res, removing);
+
+    vec3 straightCenter = center + vec3(0.1, -0.34, 0.0);
+    SdfResult straight0 = sdStraight(p - straightCenter, size * vec3(0.4, 0.04, 0.3), rotHor);
+    res = CompareSr2(res, straight0);
+
+    // sushi dishes
+    vec3 centerBox0 = phase<0.5 ? center + vec3(0.5, 0.0, 0.0) - phase*vec3(1.0, 0.0, 0.0) :
+    center + vec3(0.0, 0.0, 0.0) + (phase-0.5)*vec3(0.0, 1.0, 0.0);
+    vec3 centerBox1 = phase<0.5 ? center + vec3(0.0, 1.0, 0.0) + (phase-0.5)*vec3(0.0, 1.0, 0.0) :
+    center + vec3(0.5, 0.0, 0.0) - (phase-1.0)*vec3(1.0, 0.0, 0.0) ;
+
+    SdfResult srSushi0 = sdSushi( rgr(p - centerBox0, vec3(0.0,1.0,0.0), float(rotHor) * (PI/-2.0)), size*vec3(0.6));
+    SdfResult srSushi1 = sdSushi( rgr(p - centerBox1, vec3(0.0,1.0,0.0), float(rotHor) * (PI/-2.0)), size*vec3(0.6));
+
+    res = CompareSr3(res, srSushi0, srSushi1);
+    return res;
+}
+
+SdfResult sdTopo3(vec3 p, vec3 center, vec3 size, int rotHor, bool isNega, float t){
+    SdfResult res;
+    res.dist = 1.0e5;
+    vec4 myColor = vec4(0.3, 0.3, 1.0, 1.0);
+    vec3 po = p;
+    p = rgra(p, vec3(0.0,1.0,0.0), float(rotHor) * (PI/2.0), center);
+
+    float phase = mod(t,1.0);
+    phase = isNega ? 1.0-phase : phase;
+
+    vec3 centerBox0 = center - vec3(0.5, 0.0, 0.0) + phase*vec3(1.0, 0.0, 0.0);
+    vec3 centerBox1 = phase<0.5 ? center - vec3(0.5, 0.0, 0.0) + (phase+1.0)*vec3(1.0, 0.0, 0.0) :
+    center - vec3(0.5, 0.0, 0.0) + (phase-1.0)*vec3(1.0, 0.0, 0.0) ;
+
+    vec3 straightCenter0 = center + vec3(0.0, -0.34, 0.0);
+    SdfResult straight0 = sdStraight(p - straightCenter0, size * vec3(0.5, 0.04, 0.3), rotHor);
+    vec3 straightCenter1 = center + vec3(0.0, -0.30, 0.15*sign((p-center).z));
+    SdfResult straight1 =  sdStraight(p - straightCenter1, size * vec3(0.5, 0.04, 0.03), rotHor);
+    straight1.col = vec4(0.2,0.2,0.4,0.8);
+    res = CompareSr3(res, straight0, straight1);
+
+    SdfResult srSushi0 = sdSushi( rgr(p - centerBox0, vec3(0.0,1.0,0.0), float(rotHor) * (PI/-2.0)), size*vec3(0.6));
+    SdfResult srSushi1 = sdSushi( rgr(p - centerBox1, vec3(0.0,1.0,0.0), float(rotHor) * (PI/-2.0)), size*vec3(0.6));
+
+    res = CompareSr3(res, srSushi0, srSushi1);
+    return res;
+}
+
+SdfResult sdTopo4(vec3 p, vec3 center, vec3 size, int rotHor, bool isNega, float t){
+    SdfResult res;
+    res.dist = 1.0e5;
+    vec4 myColor = vec4(1.0,1.0,0.0, 1.0);
+    vec3 po = p;
+    p = rgra(p, vec3(0.0,1.0,0.0), float(rotHor) * (PI/2.0), center);
+
+    float phase = mod(t,1.0);
+    phase = isNega ? 1.0-phase : phase;
+
+    vec3 centerBox0 = phase<0.5 ? center + vec3(0.5, 0.0, 0.0) - phase*vec3(1.0, 0.0, 0.0) :
+    center + vec3(0.0, 0.0, 0.0) + (phase-0.5)*vec3(0.0, 0.0, 1.0);
+    vec3 centerBox1 = phase<0.5 ? center + vec3(0.0, 0.0, 0.0) + (phase+0.5)*vec3(0.0, 0.0, 1.0) :
+    center + vec3(0.5, 0.0, 0.0) - (phase-1.0)*vec3(1.0, 0.0, 0.0);
+
+
+    vec3 straightCenter0 = center + vec3(0.1, -0.34, 0.0)*size;
+    SdfResult straight0 = sdStraight(p - straightCenter0, size * vec3(0.4, 0.04, 0.3), rotHor);
+    vec3 straightCenter1 = center + vec3(0.0, -0.34, 0.1)*size;
+    SdfResult straight1 =  sdStraight(p - straightCenter1, size * vec3(0.3, 0.04, 0.4), rotHor);
+
+    res = CompareSr3(res, straight0, straight1);
+
+
+    SdfResult srSushi0 = sdSushi( rgr(p - centerBox0, vec3(0.0,1.0,0.0), float(rotHor) * (PI/-2.0)), size*vec3(0.6));
+    SdfResult srSushi1 = sdSushi( rgr(p - centerBox1, vec3(0.0,1.0,0.0), float(rotHor) * (PI/-2.0)), size*vec3(0.6));
+
+
+    res = CompareSr3(res, srSushi0, srSushi1);
+    return res;
+}
+
+SdfResult sdTopo5(vec3 p, vec3 center, vec3 size, int rotHor, bool isNega, float t){
+    SdfResult res;
+    res.dist = 1.0e5;
+    vec4 myColor = vec4(0.0,1.0,1.0, 1.0);
+    vec3 po = p;
+    p = rgra(p, vec3(0.0,1.0,0.0), float(rotHor) * (PI/2.0), center);
+    vec3 uvw = (p - center) / size + 0.5;
+
+    float phase = mod(t,1.0);
+    phase = isNega ? 1.0-phase : phase;
+
+
+    // building
+    res = CompareSr2(res, sdPillars(p - center, size, 12, rotHor));
+    SdfResult removing;
+    removing.dist = sdBox(p - (center + vec3(-0.25,-0.2,0.)), size * vec3(0.25, 0.3, 0.5));
+    removing.hitState = 1;
+    removing.col = vec4(0.3,0.3,0.35, 0.6);
+    removing.normal = RotHorRect(vec3(0.0,-1.0,0.0), -rotHor);
+    res = IntersectSr(res, removing);
+
+    vec3 straightCenter0 = center + vec3(0.4, -0.34, 0.0);
+    SdfResult straight0 = sdStraight(p - straightCenter0, size * vec3(0.1, 0.04, 0.3), rotHor);
+    vec3 straightCenter1 = center + vec3(0.4, -0.30, 0.15*sign(p-center).z);
+    SdfResult straight1 = sdStraight(p - straightCenter1, size * vec3(0.1, 0.04, 0.03), rotHor);
+    straight1.col = vec4(0.2,0.2,0.4,0.8);
+    res = CompareSr3(res, straight0, straight1);
+
+    // sushi dishes
+    vec3 centerBox0 = phase<0.5 ? center + vec3(0.0, -0.5, 0.0) + phase*vec3(0.0, 1.0, 0.0) :
+    center + vec3(0.0, 0.0, 0.0) + (phase-0.5)*vec3(1.0, 0.0, 0.0);
+    vec3 centerBox1 = phase<0.5 ? center + vec3(0.0, 0.0, 0.0) + (phase+0.5)*vec3(1.0, 0.0, 0.0) :
+    center + vec3(0.0, -0.5, 0.0) + (phase-1.0)*vec3(0.0, 1.0, 0.0);
+
+    SdfResult srSushi0 = sdSushi( rgr(p - centerBox0, vec3(0.0,1.0,0.0), float(rotHor) * (PI/-2.0)), size*vec3(0.6));
+    SdfResult srSushi1 = sdSushi( rgr(p - centerBox1, vec3(0.0,1.0,0.0), float(rotHor) * (PI/-2.0)), size*vec3(0.6));
+
+    res = CompareSr3(res, srSushi0, srSushi1);
+    return res;
+}
+
+SdfResult RenderSeg(vec3 p, float t)
+{
+    SdfResult res;
+    SegmentInTree sit = SmallestSegment(p);
+    int topo = sit.topoType;
+
+    if (topo == 0) {
+        res.dist = sit.boundSize.x * 13.0;
+        //res.dist = sdBox(p - (sit.boundMin + sit.boundSize*0.5),
+        //sit.boundSize*0.01);
+        //res.colAcc = vec4(0.5,0.5,0.5 * sin(t*38.), 1.0);
+    } else if (topo == 1) {
+        res = sdTopo1(p, sit.boundMin + sit.boundSize*0.5,
+        sit.boundSize, sit.rotHor, sit.isNega, t);
+    } else if (topo == 2) {
+        res = sdTopo2(p, sit.boundMin + sit.boundSize*0.5,
+        sit.boundSize, sit.rotHor, sit.isNega, t);
+    } else if (topo == 3) {
+        res = sdTopo3(p, sit.boundMin + sit.boundSize*0.5,
+        sit.boundSize, sit.rotHor, sit.isNega, t);
+    } else if (topo == 4) {
+        res = sdTopo4(p, sit.boundMin + sit.boundSize*0.5,
+        sit.boundSize, sit.rotHor, sit.isNega, t);
+    } else if (topo == 5) {
+        res = sdTopo5(p, sit.boundMin + sit.boundSize*0.5,
+        sit.boundSize, sit.rotHor, sit.isNega, t);
+    }
+
+    res.boundCenter = sit.boundMin + sit.boundSize*0.5;
+    res.boundSize   = sit.boundSize;
+    return res;
+}
+
+
+// Loop Info Begin
+
+
+LoopParams DefaultLoopParams(){
+    LoopParams res;
+    res.maxSteps = 130;
+    res.maxDistance = 1.0e7;
+    res.epsilon = 0.001;
+    res.degreeFov = 90.0;
+    return res;
+}
+
+
+
+CameraInfo DefaultCamera(float t){
+    CameraInfo res;
+    float strRotate = 1.0;
+    vec3 elemRotate = vec3(cos(t),sin(t),0.0) * strRotate;
+    float strForward = 90.0;//51.0;
+    vec3 elemForward = vec3(0.0, 0.0, t*0.3 + 0.3*sin(t*1.)) * strForward;
+
+    res.pos = elemRotate + elemForward + vec3(3., 5.5, 14.); // Camera Pos
+
+    float shake = 1.0;
+    res.dir = normalize(vec3(0.0, shake*0.5*cos(t*0.2), 1.0));       // Camera Dir
+    res.dir = rgr(res.dir, vec3(0.0, 1.0, 0.0), shake*sin(t*0.2) * 1.);
+
+    res.u = normalize(cross(vec3(0.0, 1.0, 0.0), res.dir)); // Camera-U
+    res.v = normalize(cross(res.dir, res.u));     // Camera-V
+    return res;
+}
+
+
+
+RayResult InitialRay(CameraInfo cam){
+    RayResult res;
+    res.pos = cam.pos;
+    res.hit = false;
+    res.colAcc = vec4(0.0);
+    return res;
+}
+
+
+SdfResult SceneSDF(vec3 p, float t)
+{
+    return RenderSeg(p, t);
+}
+
+vec3 draw(vec2 p, float t){
+
+    vec3 col = vec3(0.0);
+
+    // Init Structs
+    LoopParams lpar = DefaultLoopParams();
+    CameraInfo cam = DefaultCamera(t);
+    RayResult ray = InitialRay(cam);
+
+    // Loop
+    ray.dir = normalize(cam.u * p.x + cam.v * p.y + cam.dir / tan(lpar.degreeFov / 180.0 * PI / 2.0)); // Ray Dir
+    int maxSteps = lpar.maxSteps;
+    if(false){
+        maxSteps = int(
+        30.* pow(randPcg(ray.dir*2300. + cam.pos*100. + vec3(t)),1.0) +
+        float(lpar.maxSteps) * pow(randPcg(ray.dir*1000.), 6.0)
+        );
+    }
+
+    for (int i = 0; i < maxSteps; i++) {
+        SdfResult recv =  SceneSDF(ray.pos, t);
+        float nearest = recv.dist;
+        if (nearest < lpar.epsilon * pow(length(cam.pos.xyz - ray.pos.xyz)/3.0, 0.3)) {
+            float brightness = exp(-0.01 * length(ray.pos - cam.pos));
+            if(recv.hitState == 0){
+                float amount = (1.0-ray.colAcc.w) * recv.col.w;
+                ray.colAcc.xyz += amount * recv.col.xyz * brightness;
+                ray.colAcc.w += amount;
+                ray.hit = true;
+                break;
+            }
+            else if(recv.hitState == 1){
+                float amount = (1.0-ray.colAcc.w) * recv.col.w;
+                ray.colAcc.xyz += amount * recv.col.xyz * brightness;
+                ray.colAcc.w += amount;
+                ray.dir = reflect(ray.dir, recv.normal);
+                ray.pos += ray.dir * lpar.epsilon * 2.0;
+            }
+        }
+        vec3 prevPos = ray.pos;
+        vec3 nextPos = ray.pos + nearest * ray.dir*0.9;
+
+
+        vec3 vOut = (nextPos - recv.boundCenter);
+        vec3 dirOut = normalize(vOut);
+        vec3 boundMin = recv.boundCenter - recv.boundSize*0.5;
+        vec3 boundMax = recv.boundCenter + recv.boundSize*0.5;
+
+        float ratio = 1.0;
+        ratio = min(ratio, abs(boundMin.x - prevPos.x)/abs(nextPos.x - prevPos.x));
+        ratio = min(ratio, abs(boundMin.y - prevPos.y)/abs(nextPos.y - prevPos.y));
+        ratio = min(ratio, abs(boundMin.z - prevPos.z)/abs(nextPos.z - prevPos.z));
+        ratio = min(ratio, abs(boundMax.x - prevPos.x)/abs(nextPos.x - prevPos.x));
+        ratio = min(ratio, abs(boundMax.y - prevPos.y)/abs(nextPos.y - prevPos.y));
+        ratio = min(ratio, abs(boundMax.z - prevPos.z)/abs(nextPos.z - prevPos.z));
+
+        nextPos = ray.pos + (nearest * ray.dir)*ratio + normalize(nearest * ray.dir)
+        * min(0.01, length(ray.pos-cam.pos)*1e-4);
+        ray.pos = nextPos;
+
+        if (length(ray.pos - cam.pos) > lpar.maxDistance){
+            break;
+        }
+    }
+
+
+    vec3 colBg = vec3(0.);
+    col = ray.colAcc.xyz;
+
+
+    return col;
+}
+
+
+
+
+void mainImage( out vec4 fragColor, in vec2 fragCoord ) {
+
+    // Minimum In/Out
+    vec2 p = 2.0 * (fragCoord - 0.5 * iResolution.xy) / iResolution.y;
+    vec3 col = vec3(0.0);
+
+    col.xyz = draw(p,iTime);
+
+
+    fragColor = vec4(col, 1.0);
+}
