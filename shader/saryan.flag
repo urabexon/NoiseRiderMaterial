@@ -1,0 +1,17 @@
+#define f(x) .8*x+.6*sin(92.*x)
+
+
+void mainImage( out vec4 C, in vec2 U )
+{
+    vec2  R = iResolution.xy,
+          u = ( U+U - R ) / R.x;
+          
+    float a = .2 - .2*abs(u.x), T = iTime;
+    vec3 x = u.x + a*vec3(
+        sin(5.*u.y + .7*T + .9 + u.x) * sin(2.*u.y - .7*T - .7 + u.x),
+        sin(4.*u.y - .3*T + .4 + u.x) * sin(3.*u.y - .8*T + .1 + u.x),
+        sin(3.*u.y + .9*T - .3 + u.x) * sin(4.*u.y - .6*T - .1 + u.x)
+    );
+
+    C = vec4(smoothstep(.0, .1, f(x)), 1.);
+}
