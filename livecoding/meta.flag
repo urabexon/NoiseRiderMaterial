@@ -1,0 +1,480 @@
+const float LAST_PATT = 3.;
+const float cstep=1./256.;
+
+float density=50., density2=-1.;
+float liveval = 2.0;
+int newmethod = 0;
+float decimate = 0.;
+float rp,gp,bp, rm,gm,bm, stayval;
+int colch, staypatt;
+int ra,ga,ba;
+bool clampstay;
+int setmethod;
+int stayset, bornset;
+int nh;
+int wrap;
+
+void setRules(int index, vec3 col) {
+    int v1, v2;
+    decimate = 1.;liveval=2.;
+
+    rp=4.,gp=3.,bp=10., rm=2.,gm=2.,bm=8., ra=7,ga=7,ba=7,staypatt=1,stayval=1.,colch=0, clampstay=false, setmethod=0; nh=10, wrap=0, density2=-1.;
+
+    // sponge
+    if (index == 0) {nh=5; v1 = 1175456, v2=1910512; density=11., liveval=6., decimate=1., colch=1, staypatt=0, rp=0.24, gp=0.36, bp=0.15, rm=26., gm=41.,bm=81.,  ra=1,ga=2,ba=4; density2=15.; }
+
+    // baby explosions
+    if (index == 1) {nh=5; v1 = 1175524, v2=1910512; density=20., liveval=6., decimate=1., colch=1, staypatt=0, rp=3., gp=1.5, bp=1.5, rm=6., gm=8.,bm=13.,  ra=1,ga=2,ba=4; }
+
+    // worms
+    if (index == 2) {nh=10; v1 = 4094, v2=3966; density=90., liveval=5., decimate=0., colch=2, staypatt=0, rp=10., gp=4., bp=4., rm=16., gm=16.,bm=18.,  ra=6,ga=7,ba=6; density2=6.;}
+
+    // generative
+    if (index == 3) {nh=0; v1 = 23, v2=86; density=6., liveval=5., decimate=0., colch=2, staypatt=0, rp=10.*1.3, gp=7.*1.3, bp=20.*1.3, rm=2., gm=2.,bm=2.,  ra=1,ga=2,ba=4; }
+
+    // pump
+    if (index == 4) {nh=5; v1 = 1175552, v2=1910552; density=100., liveval=7., decimate=1., colch=3, staypatt=0, rp=11.5, gp=6.5, bp=6.5, rm=6., gm=7.5,bm=13.,  ra=1,ga=3,ba=7; density2=10.; }
+
+    // straight lines
+    if (index == 5) {nh=6; v1 = 50182, v2=16516; density=20., liveval=6., decimate=0., colch=1, staypatt=5, rp=4., gp=4., bp=8., rm=6., gm=16.,bm=18.,  ra=6,ga=7,ba=6; }
+
+    // small worms
+    if (index == 6) {nh=10, v1 = 64860, v2=4094; density=80.; liveval=2.; decimate=0.; colch=2, staypatt=6; rp=9.; rm=16.,gm=16.,bm=18.; ra=6,ga=7,ba=6; density2=10.; } 
+
+    // straight lines II
+    if (index == 7) {nh=-1, v1 = 200, v2=14; density=-1.3; liveval=3.; decimate=1.; staypatt=6; rp=5.; rm=8.5,gm=8.5,bm=6.; ra=1,ga=2,ba=4; density2=10.; } 
+
+    // square critters
+    if (index == 8) {nh=4, v1 = 1175537, v2=1910520; density=70.; liveval=6.; decimate=1.;  colch=1, staypatt=1, rp=10., gp=2.5, bp=1., rm=39., gm=39.,bm=39.,  ra=1,ga=2,ba=4; density2=10.; } 
+
+
+    rp=rp+col.x; gp=gp+col.y; bp=bp+col.z;
+    stayset = v1; bornset = v2;
+}
+
+float hash1( float n ) {
+    return fract(sin(n)*138.5453123);
+}
+
+const int KEY_SPACE = 32;
+const int KEY_ENTER = 13;
+const int KEY_LEFT  = 37;
+const int KEY_RIGHT = 39;
+const int KEY_UP    = 38;
+const int KEY_DOWN  = 40;
+const int KEY_1     = 49;
+const int KEY_2     = 50;
+const int KEY_3     = 51;
+const int KEY_4     = 52;
+const int KEY_5     = 53;
+const int KEY_Z     = 90;
+const int KEY_X     = 88;
+
+bool readKey( int key )
+{
+	float keyVal = texture( iChannel1, vec2( (float(key)+.5)/256.0, .25 ) ).x;
+	return (keyVal>.5)?true:false;
+}
+
+int cell( in ivec2 p )
+{
+    ivec2 r = ivec2(textureSize(iChannel0, 0));
+    p = (p+r) % r;
+    float val = texelFetch(iChannel0, p, 0 ).w;
+    return ( val == liveval ) ? 1 : 0;
+}
+vec4 cellval( in ivec2 p )
+{
+    ivec2 r = ivec2(textureSize(iChannel0, 0));
+    p = (p+r) % r;
+    return texelFetch(iChannel0, p, 0 );
+}
+
+float randpix(vec2 fragCoord) {
+    float rn = hash1(iTime+fragCoord.x*13.0+hash1(fragCoord.y*71.1));
+    return clamp(step(1.01-density/100., rn), 0., 1.) * (liveval);
+}
+
+float restart(vec2 fragCoord, int method, bool preserve) {
+    if (method == 0)
+        return randpix(fragCoord);
+
+    vec2 mid = iResolution.xy / 2.; 
+    float w=100., h=100., radius=452., rradius=25.;
+    if (iResolution.y < 1000.) radius=182.;
+    float xrad=569.,yrad=453.;
+    float thick=2., wl=w-thick, hl=h-thick;
+
+    if (method == 1) {
+        if (length(fragCoord-mid)< radius && length(fragCoord-mid) > (radius-thick))
+            return liveval;
+    }
+    if (method == 2) {
+        if (((fragCoord.x > mid.x - w && fragCoord.x < mid.x - wl) || (fragCoord.x > mid.x + wl && fragCoord.x < mid.x + w))
+            && fragCoord.y > mid.y - h && fragCoord.y < mid.y + h)
+            return liveval;
+        if (((fragCoord.y > mid.y - h && fragCoord.y < mid.y - hl) || (fragCoord.y > mid.y + hl && fragCoord.y < mid.y + h))
+            && fragCoord.x > mid.x - w && fragCoord.x < mid.x + w)
+            return liveval;
+    }
+    if (method == 3) {
+        if (length(vec2((fragCoord.x-mid.x)*0.793,(fragCoord.y-mid.y)*1.0))< radius)
+            return liveval;
+    }
+    if (method == 4) {
+        float xmul=1.; if (iResolution.y < 1000.) xmul=1.75;
+        if (fragCoord.x > mid.x - rradius*xmul && fragCoord.x < mid.x + rradius*xmul+1. && fragCoord.y > mid.y - rradius && fragCoord.y < mid.y + rradius +1.)
+            return liveval;
+    }
+    return preserve? -1. : 0.;
+}
+
+
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+    float ix = texelFetch(iChannel2, ivec2(0,0), 0 ).x;
+    float xres = texelFetch(iChannel2, ivec2(0,1), 0 ).x;
+    int method = int(texelFetch(iChannel2, ivec2(1,0), 0 ).x);
+    int speed = int(texelFetch(iChannel2, ivec2(2,0), 0 ).x);
+    int mono = int(texelFetch(iChannel2, ivec2(3,0), 0 ).x);
+    int rows = 2+ int(texelFetch(iChannel2, ivec2(4,0), 0 ).x);
+    
+    float xsq = 3., ysq = float(rows);
+    float wsq = iResolution.x / xsq;
+    float hsq = iResolution.y / ysq;
+    float thick = 3.;
+
+    int cix = (int(fragCoord.x / wsq) + int(fragCoord.y / hsq)*int(xsq) + int(ix*10.)) % 9;
+    setRules(cix, vec3(0.));
+    if (cix==3 && iResolution.y < 400.) { rp*=1.8; gp*=1.8; bp*=1.8; } 
+
+    float dt=density; if (density2 >= 0.) density=density2; if (cix==0 && iResolution.y > 400.) density=0.;
+    float i, bsh=1.;
+    for (i=0.; i<=xsq; i++) {
+        if (fragCoord.x > wsq*i-thick && fragCoord.x < wsq*i+thick ) {
+            fragColor = vec4(bsh,bsh,bsh,randpix(fragCoord));
+            return;
+        }
+    }
+    for (i=0.; i<=ysq; i++) {
+        if (fragCoord.y > hsq*i-thick && fragCoord.y < hsq*i+thick ) {
+            fragColor = vec4(bsh,bsh,bsh,randpix(fragCoord));
+            return;
+        }
+    }
+    density=dt;
+
+    ivec2 px = ivec2( fragCoord );
+    vec4 curr = cellval(px);
+    float ev = curr.w;
+
+    if( iFrame==0 || readKey(KEY_SPACE) || readKey(KEY_ENTER) || readKey(KEY_Z) || readKey(KEY_X) || int(xres) != int(iResolution.x) ) {
+        fragColor = vec4( 0.0, 0.0, 0.0, restart(fragCoord, setmethod, false));
+        return;
+    }
+
+    if( readKey(KEY_1) || readKey(KEY_2) || readKey(KEY_3) || readKey(KEY_4) || readKey(KEY_5) ) {
+        fragColor = vec4( 0.0, 0.0, 0.0, restart(fragCoord, method, false));
+        return;
+    }
+
+    if (iFrame % (speed+1) > 0) {
+        fragColor = curr;
+        return;
+    }
+  
+    int k=0;
+    
+    if (nh == 0) {
+        // ..X..
+        // .X.X.
+        // X.*.X
+        // .X.X.
+        // ..X..
+        k =   cell(px+ivec2(0,-2)) + cell(px+ivec2(-1,-1)) + cell(px+ivec2(1,-1))
+            + cell(px+ivec2(-2, 0))                        + cell(px+ivec2(2, 0))
+            + cell(px+ivec2(-1, 1)) + cell(px+ivec2(1, 1)) + cell(px+ivec2(0, 2));
+    } else if (nh == 4 || nh==5 || nh == 6) {
+        // .XXX. 4
+        // XXXXX
+        // XX*XX
+        // XXXXX
+        // .XXX.
+        k =   cell(px+ivec2(-1, 2)) + cell(px+ivec2(0, 2)) + cell(px+ivec2(1, 2))
+            + cell(px+ivec2(-1, -2)) + cell(px+ivec2(0, -2)) + cell(px+ivec2(1, -2))
+            + cell(px+ivec2(-2, -1)) + cell(px+ivec2(-2, 0))
+            + cell(px+ivec2(-2, 1))
+            + cell(px+ivec2(2, -1)) + cell(px+ivec2(2, 0))
+            + cell(px+ivec2(2, 1));
+        // XXXXX 6
+        // X...X
+        // X.*.X
+        // X...X
+        // XXXXX
+        if (nh > 4) k += cell(px+ivec2(2, 2)) + cell(px+ivec2(-2, -2)) + cell(px+ivec2(-2, 2)) + cell(px+ivec2(2, -2));
+        // XXXXX 5
+        // XXXXX
+        // XX*XX
+        // XXXXX
+        // XXXXX
+        if (nh < 6)
+            k += cell(px+ivec2(0,-1))
+            + cell(px+ivec2(-1, 0)) + cell(px+ivec2(1, 0))
+            + cell(px+ivec2(0, 1))  + cell(px+ivec2(-1,-1)) + cell(px+ivec2(1,-1))
+            + cell(px+ivec2(-1, 1)) + cell(px+ivec2(1, 1));
+    } else if (nh == 10) {
+        // XXXXX
+        // ..X..
+        // ..*..
+        // ..X..
+        // XXXXX    
+        k =   cell(px+ivec2(0,-1)) + cell(px+ivec2(0,1)) +
+            + cell(px+ivec2(-2, -2)) + cell(px+ivec2(-1, -2)) + cell(px+ivec2(0, -2)) + cell(px+ivec2(1, -2)) + cell(px+ivec2(2, -2))
+            + cell(px+ivec2(-2, 2)) + cell(px+ivec2(-1, 2)) + cell(px+ivec2(0, 2)) + cell(px+ivec2(1, 2)) + cell(px+ivec2(2, 2));
+    } else {
+        // XXX
+        // X*X
+        // XXX
+        k =   cell(px+ivec2(-1,-1)) + cell(px+ivec2(0,-1)) + cell(px+ivec2(1,-1))
+            + cell(px+ivec2(-1, 0))                        + cell(px+ivec2(1, 0))
+            + cell(px+ivec2(-1, 1)) + cell(px+ivec2(0, 1)) + cell(px+ivec2(1, 1));
+    }
+    
+    float ff = 0.;
+    if (ev > 0.5) {
+        if (decimate > 0.) ff = ev-decimate;
+        if ((stayset & (1<<(k-1))) > 0 ) { ff = float(k); if (clampstay && ff > liveval) ff = liveval; }
+    }
+    else {
+        ff = (bornset & (1<<(k-1))) > 0 ? liveval : 0.;
+    }
+
+    if (mono == 0) {
+        if (ff >= 1.0) {
+            int st = int(ff);
+
+            float mulbase = float(k);
+            if (colch == 1) mulbase = ff;
+            else if (colch == 2) mulbase = 1.;
+            else if (colch == 3) mulbase = float(k^st);
+            
+            if ((st & ra) > 0) curr.x += cstep*mulbase*rp;
+            if ((st & ga) > 0) curr.y += cstep*mulbase*gp;
+            if ((st & ba) > 0) curr.z += cstep*mulbase*bp;
+            
+            if (staypatt == 5 || staypatt == 6) curr.z=curr.y=curr.x;	
+
+        } else {
+            float stayt = cstep * stayval;
+            
+            if (staypatt == 0 || staypatt > 5) {
+                curr.x -= cstep*rm;
+                curr.y -= cstep*gm;
+                curr.z -= cstep*bm;
+            }
+            else if (staypatt == 1) {
+                if(curr.x > cstep) {
+                    curr.x -= cstep*rm;
+                    curr.y -= cstep*gm;
+                    curr.z -= cstep*bm;
+                }
+            }
+            else if (staypatt == 2) {
+                if(curr.y > cstep) {
+                    curr.x -= cstep*rm;
+                    curr.y -= cstep*gm;
+                    curr.z -= cstep*bm;
+                }
+            }
+            else if (staypatt == 3) {
+                if(curr.z > cstep) {
+                    curr.x -= cstep*rm;
+                    curr.y -= cstep*gm;
+                    curr.z -= cstep*bm;
+                }
+            }
+            else if (staypatt == 4) {
+                if(curr.z > cstep) {
+                    curr.x -= cstep*rm;
+                    curr.y -= cstep*gm;
+                }
+                if(curr.x > cstep) curr.z -= cstep*bm;
+            }
+            else if (staypatt == 5) {
+                curr.x -= cstep*rm;
+                curr.z=curr.y=curr.x;
+            }
+        }
+    }
+
+	fragColor = vec4( clamp(curr.xyz,0.,1.), ff );
+}
+
+const int KEY_LEFT  = 37;
+const int KEY_RIGHT = 39;
+const int KEY_UP    = 38;
+const int KEY_DOWN  = 40;
+const int KEY_ENTER = 13;
+const int KEY_1     = 49;
+const int KEY_2     = 50;
+const int KEY_3     = 51;
+const int KEY_4     = 52;
+const int KEY_5     = 53;
+const int KEY_7     = 55;
+const int KEY_8     = 56;
+const int KEY_9     = 57;
+const int KEY_A     = 65;
+const int KEY_M     = 77;
+const int KEY_W     = 87;
+const int KEY_Z     = 90;
+const int KEY_X     = 88;
+const int KEY_C     = 67;
+const int KEY_V     = 86;
+
+bool readKey( int key ) {
+	float keyVal = texture( iChannel1, vec2( (float(key)+.5)/256.0, .25 ) ).x;
+	return (keyVal>.5)?true:false;
+}
+
+vec4 keyStep(int ix, int iy, int key, float delta, float maxval) {
+    vec3 keystate = texelFetch(iChannel0, ivec2(ix,iy), 0 ).xyz;
+    float kx=keystate.x;
+    float ky=keystate.y;
+    if( readKey(key) ) {
+        if (ky == 0.) {
+            kx+=1.;
+            if (kx >= maxval) kx=0.;
+            if (kx < 0.) kx=maxval-delta;
+        }
+        ky+=0.01;
+        if (ky >= 1.0) ky=0.;
+    }
+    else {
+        ky = 0.;
+    }
+    return vec4(kx,ky,0.,0.);
+}
+
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+    int ix = int(fragCoord.x), iy = int(fragCoord.y);
+
+    if (iy > 1) {
+        fragColor = vec4(0.,0.,0.,1.0);
+        return;
+    }
+
+    if (ix == 0 && iy == 0) {
+        vec3 keystate = texelFetch(iChannel0, ivec2(ix,iy), 0 ).xyz;
+        float kx=keystate.x;
+        float ky=keystate.y;
+        if( readKey(KEY_Z)||readKey(KEY_X)||readKey(KEY_C)||readKey(KEY_V) ) {
+            if (ky == 0.) {
+                if (readKey(KEY_X) || readKey(KEY_V)) {
+                    kx+=0.1;
+                    if (kx > LAST_PATT*0.1+0.05) kx=0.05;
+                } else {
+                    kx-=0.1;
+                    if (kx < 0.) kx=LAST_PATT*0.1+0.05;
+                }
+            }
+            ky+=0.01;
+            if (ky >= 1.0) ky=0.;
+        }
+        else {
+            ky = 0.;
+        }
+        fragColor = vec4(kx,ky,0.,0.);
+        return;
+    }
+
+    if (ix == 1 && iy == 0) {
+        float method = texelFetch(iChannel0, ivec2(ix,iy), 0 ).x;
+        if( readKey(KEY_1)) method = 0.5;
+        if( readKey(KEY_2)) method = 1.5;
+        if( readKey(KEY_3)) method = 2.5;
+        if( readKey(KEY_4)) method = 3.5;
+        if( readKey(KEY_5)) method = 4.5;
+        fragColor = vec4(method,0.,0.,0.);
+        return;
+    }
+
+    if (ix == 2 && iy == 0) {
+        float speed = texelFetch(iChannel0, ivec2(ix,iy), 0 ).x;
+        if( readKey(KEY_7)) speed = 0.;
+        if( readKey(KEY_8)) speed = 1.;
+        if( readKey(KEY_9)) speed = 5.;
+        fragColor = vec4(speed,0.,0.,0.);
+        return;
+    }
+
+    if (ix == 3 && iy == 0) {
+        fragColor = keyStep(ix, iy, KEY_M, 1., 2.);
+        return;
+    }
+
+    if (ix == 4 && iy == 0) {
+        fragColor = keyStep(ix, iy, KEY_ENTER, 1., 2.);
+        return;
+    }
+
+    if (ix == 5 && iy == 0) {
+        fragColor = keyStep(ix, iy, KEY_A, 1., 2.);
+        return;
+    }
+
+    if (ix == 10 && iy == 0) {
+        vec2 ppos = texelFetch(iChannel0, ivec2(ix,iy), 0 ).xy;
+        float mmul = iMouse.x / iResolution.x;
+        vec2 mid = iResolution.xy / 2.;
+
+        float psp=8.;
+        if( readKey(KEY_RIGHT)) ppos.x += psp;
+        if( readKey(KEY_LEFT)) ppos.x -= psp;
+        if( readKey(KEY_DOWN)) ppos.y -= psp;
+        if( readKey(KEY_UP)) ppos.y += psp;
+        ppos.x = clamp(ppos.x, -mid.x*mmul, mid.x*mmul);
+        ppos.y = clamp(ppos.y, -mid.y*mmul, mid.y*mmul);
+
+        fragColor = vec4(ppos,0.,1.);
+        return;
+    }
+
+
+    if (ix == 0 && iy == 1) {
+        fragColor = vec4(iResolution.x,0.,0.,0.);
+        return;
+    }
+
+    fragColor = vec4(0.,0.,0.,1.0);
+}
+
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+    float ix = texelFetch(iChannel1, ivec2(0,0), 0 ).x;
+    int mono = int(texelFetch(iChannel1, ivec2(3,0), 0 ).x);
+    int aa = 1-int(texelFetch(iChannel1, ivec2(5,0), 0 ).x);
+    vec2 ppos = texelFetch(iChannel1, ivec2(10,0), 0 ).xy;
+
+    float mx= iMouse.x / iResolution.x;
+    vec2 mid = iResolution.xy / 2.;
+    float mmul = 1.-mx;
+    fragCoord = mid - (mid*mmul-fragCoord*mmul) + ppos;
+
+    vec4 val = vec4(0.);
+    int am=0, ap=aa, j=0;
+    for (int j = -am; j <= ap; j++)
+        for (int i = -am; i <= ap; i++)
+            val += texelFetch( iChannel0, ivec2(int(fragCoord.x)+i,int(fragCoord.y)+j), 0 );
+    float n=float((am+ap+1));
+    if (am+ap > 0) val /= n*n-2.;
+    
+    if (aa == 0) val/=0.6;
+    
+    if (mono == 0) {
+        fragColor = val;
+    } else {
+        float v=(1./liveval)*val.w;
+        fragColor = vec4( v*0.9, v*0.95, v, 1.0 );
+    }
+}
