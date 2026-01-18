@@ -1,0 +1,107 @@
+#define TAU 6.28318530718
+#define TIME_SCALE 0.2
+#define SHAPE_DISTORTION 1.2
+#define COLOR_SHIFT 0.7
+#define ROTATION_SPEED 0.5
+#define INTENSITY 1.5
+#define SPIRAL_FACTOR 2.0
+#define MORPH_SPEED 0.3
+
+vec3 palette(float t) {
+    vec3 a = vec3(0.5, 0.5, 0.5);
+    vec3 b = vec3(0.5, 0.5, 0.5);
+    vec3 c = vec3(1.0, 1.0, 1.0);
+    vec3 d = vec3(0.263 + COLOR_SHIFT, 0.416 + COLOR_SHIFT * 0.5, 0.657 + sin(t * 0.2) * 0.3);
+    return a + b * cos(4.0 * (c * t + d));
+}
+
+mat2 rotation(float angle) {
+    float modified_angle = angle * ROTATION_SPEED;
+    return mat2(cos(modified_angle), -sin(modified_angle),
+                sin(modified_angle), cos(modified_angle));
+}
+
+float spiral_dist(vec2 p, float r) {
+    float theta = atan(p.y, p.x);
+    float spiral = length(p) - r - sin(theta * SPIRAL_FACTOR + iTime * TIME_SCALE) * 0.2;
+    return spiral;
+}
+
+float morph_shape(vec2 pos, float r, float time) {
+    vec2 p = pos * SHAPE_DISTORTION;
+    
+    // Create morphing between different shapes
+    float morph = sin(time * MORPH_SPEED) * 0.5 + 0.5;
+    
+    // Spiral distance
+    float spiral = spiral_dist(p, r);
+    
+    // Hexagonal distance
+    float angle = TAU / 6.0;
+    vec2 hex_p = vec2(
+        cos(floor(0.5 + atan(p.y, p.x) / angle) * angle),
+        sin(floor(0.5 + atan(p.y, p.x) / angle) * angle)
+    );
+    float hex = abs(dot(normalize(hex_p), p)) - r;
+    
+    // Smooth interpolation between spiral and hex
+    return mix(spiral, hex, morph);
+}
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+    vec2 uv = (fragCoord.xy * 2.0 - iResolution.xy) / iResolution.y;
+    vec2 uv0 = uv;
+    vec3 finalColor = vec3(0.0);
+
+    // Add spiral distortion to UV coordinates
+    float dist = length(uv);
+    float angle = atan(uv.y, uv.x);
+    float spiral_warp = sin(dist * 10.0 - iTime * TIME_SCALE) * 0.1;
+    uv *= (1.0 + spiral_warp);
+
+    for (float i = 0.0; i < 4.0; i += 1.0) {
+        vec3 col2 = vec3(0.0);
+        float t = fract(0.1 * iTime * TIME_SCALE * 0.51);
+        
+        // Add wave distortion
+        float wave = sin(uv.x * 5.0 + iTime * TIME_SCALE) * cos(uv.y * 5.0 + iTime * TIME_SCALE) * 0.1;
+        uv += vec2(wave);
+        
+        mat2 rot1 = rotation(3.0 * TAU * (0.3 - clamp(length(uv), 0.0, 0.3)));
+        uv = rot1 * uv;
+        
+        float s = -1.0;
+        for (float j = 0.0; j < 5.0; j += 1.0) {
+            float rad = 1.4 / pow(2.0, j) * (0.9 - 0.2 * j);
+            
+            mat2 rot2 = rotation(-2.0 * s * (j + 1.0) * TAU * t);
+            uv = rot2 * uv;
+            
+            // Use our morphing shape
+            float shape = morph_shape(uv, rad, iTime);
+            s *= -1.0;
+            col2 += 1.004 / abs(shape);
+        }
+
+        uv = fract(uv * 1.5) - 0.5;
+        float d = length(uv) * exp(-length(uv0));
+        
+        // Add time-varying color modulation
+        float time_factor = sin(iTime * TIME_SCALE * 0.5) * 0.5 + 0.5;
+        vec3 col = palette(length(uv0) + i * 0.4 + iTime * TIME_SCALE * 0.4 + time_factor);
+
+        d = sin(d * 8.0 + iTime * TIME_SCALE) / 8.0;
+        d = abs(d);
+        d = pow(0.01 / d, 1.2);
+        
+        // Add pulsing intensity
+        float pulse = sin(iTime * TIME_SCALE * 0.5) * 0.2 + 1.0;
+        finalColor += col * d * INTENSITY * pulse;
+    }
+
+    // Add subtle color cycling to the final output
+    float cycle = sin(iTime * TIME_SCALE * 0.2) * 0.1 + 1.0;
+    finalColor *= vec3(cycle, cycle * 0.9, cycle * 1.1);
+
+    fragColor = vec4(finalColor, 1.0);
+}
