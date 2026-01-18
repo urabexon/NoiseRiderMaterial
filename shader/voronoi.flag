@@ -1,0 +1,312 @@
+#ifdef GL_ES
+precision mediump float;
+#endif
+
+//---------------------------------------------------------------
+// Buffer A
+//---------------------------------------------------------------
+// We store (zoomFactor, direction) in RG, to oscillate between
+// zoomMin and zoomMax. Larger zoomFactor means “zoom out” (see more).
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+    // Read previous frame (ping-pong feedback)
+    vec4 old = texture(iChannel0, fragCoord / iResolution.xy);
+
+    float zoom = old.x;
+    float dir  = old.y;
+
+    // Initialize on the first frame
+    if (iFrame == 0)
+    {
+        zoom = 0.80;  // start somewhere in the middle
+        dir  = 0.80;
+    }
+
+    // Define minimum and maximum zoom levels
+    float zoomMin = 0.50;
+    float zoomMax = 1.0;
+
+    // Compute how far along we are (0.0 to 1.0)
+    float t = (zoom - zoomMin) / (zoomMax - zoomMin);
+    t = clamp(t, 0.0, 1.0);
+
+    // Define speeds: slow near zoomMin, fast near zoomMax
+    float slowSpeed = 0.00005;
+    float fastSpeed = 0.00005;
+
+    // Interpolate the speed based on t
+    float dynamicRate = mix(slowSpeed, fastSpeed, t);
+
+    // Update the zoom value
+    zoom += dir * dynamicRate;
+
+    // Reverse direction if zoom is out-of-bounds
+    if (zoom < zoomMin)
+    {
+        zoom = zoomMin;
+        dir  = 1.0;
+    }
+    else if (zoom > zoomMax)
+    {
+        zoom = zoomMax;
+        dir  = -1.0;
+    }
+
+    // Output zoom and direction (other channels can be zero)
+    fragColor = vec4(zoom, dir, 0.0, 1.0);
+}
+
+float hash21(vec2 f){
+    uvec2 p = floatBitsToUint(f + 16384.0);
+    p = 1664525U * (p >> 1U ^ p.yx);
+    return float(1103515245U * (p.x ^ (p.y >> 3U))) / float(0xffffffffU);
+}
+
+// Hash function for random points
+vec2 hash22(vec2 f){
+    uvec2 p = floatBitsToUint(f + 1024.0);
+    p = 1103515245U * ((p >> 1U) ^ p.yx);
+    uint h32 = 1103515245U * (p.x ^ (p.y >> 3U));
+    uint n = h32 ^ (h32 >> 16);
+    uvec2 rz = uvec2(n, n * 48271U);
+    return sin(vec2((rz >> 1) & uvec2(0x7fffffffU)) / float(0x7fffffffU) * TAU + iTime) * 0.4;
+}
+
+// Unsigned distance to a line segment
+float distLine(vec2 p, vec2 a, vec2 b){
+    p -= a; 
+    b -= a;
+    float h = clamp(dot(p, b) / dot(b, b), 0.0, 1.0);
+    return length(p - b * h);
+}
+
+// Signed distance to a line (infinite)
+float distLineS(vec2 p, vec2 a, vec2 b){
+    p -= a; 
+    b -= a;
+    float h = clamp(dot(p, b) / dot(b, b), 0.0, 1.0);
+    return length(p - b * h) * sign( (b.x * p.y - b.y * p.x) );
+}
+
+// Ray-line intersection distance
+float lineIntersect(vec2 ro, vec2 rd, vec2 a, vec2 b){
+    vec2 v1 = ro - a;
+    vec2 v2 = b - a;
+    vec2 v3 = vec2(-rd.y, rd.x);
+    float dotP = dot(v2, v3);
+    if (abs(dotP) < 1e-6) return 1e8;
+    float t1 = (v2.x * v1.y - v2.y * v1.x) / dotP;
+    float t2 = dot(v1, v3) / dotP;
+    if(t1 >= 0.0 && (t2 >= 0.0 && t2 <= 1.0)) return t1;
+    return 1e8;
+}
+
+vec3 Voronoi(vec2 p){
+    
+    // Grid setup
+    vec2 ip = floor(p) + 0.5;
+    p -= ip;
+    
+    // Find closest centroid
+    float vor = 1e5;
+    vec2 offsID = vec2(0.0);
+    for(int i = 0; i < 9; i++){
+        vec2 offs = vec2(float(i % 3), float(i / 3)) - float(3/2);
+        vec2 offsP = offs + hash22(ip + offs);
+        float d = length(p - offsP);
+        if(d < vor){
+            vor = d;
+            offsID = offs;
+        }
+    }
+    
+    // Neighboring cells (5x5 grid, excluding center)
+    const int N = 5;
+    const int totN = N * N - 1;
+    vec2 neighbor[totN];
+    int index = 0;
+    for(int i = 0; i < N * N; i++){
+        vec2 offs = vec2(float(i % N), float(i / N)) - float(N/2);
+        if(offs == vec2(0.0)) continue;
+        neighbor[index++] = offs;
+    }
+    
+    // Cell center
+    vec2 pointCenter = offsID + hash22(ip + offsID);
+    
+    // Find nearest neighboring point
+    int minID = 0;
+    float minDist = 1e8;
+    for(int k = 0; k < totN; k++){
+        vec2 idI = offsID + neighbor[k];
+        vec2 pI = idI + hash22(ip + idI);
+        float d = length(pointCenter - pI);
+        if(d < minDist){
+            minDist = d;
+            minID = k;
+        }
+    }
+    
+    // Start edge detection
+    int startID = minID, curID = 0;
+    vec2 edgePoint = vec2(1e5);
+    vec2 id0 = offsID + neighbor[startID];
+    vec2 p0 = id0 + hash22(ip + id0);
+    vec2 t01 = normalize(p0 - pointCenter).yx * vec2(-1.0, 1.0);
+    vec2 m01 = mix(pointCenter, p0, 0.5);
+    minDist = 1e8;
+    
+    for(int k = 0; k < totN - 1; k++){
+        int nextID = (startID + k + 1) % totN;
+        vec2 idI = offsID + neighbor[nextID];
+        vec2 pI = idI + hash22(ip + idI);
+        vec2 t02 = normalize(pI - pointCenter).yx * vec2(-1.0, 1.0) * 8.0;
+        vec2 m02 = mix(pointCenter, pI, 0.5);
+        float t = lineIntersect(m01, t01, m02 - t02, m02 + t02);
+        if(t > 1e-5 && t < minDist){
+            minDist = t;
+            edgePoint = m01 + t * t01;
+            curID = nextID;
+        }
+    }
+    
+    // Collect edge vertices
+    vec2 pointList[totN];
+    vec2 edgePointList[totN];
+    vec2 startPoint = edgePoint;
+    int edgeNum = 0;
+    
+    for(int j = 0; j < 16; j++){
+        minDist = 1e8;
+        vec2 idI = offsID + neighbor[curID];
+        vec2 pI = idI + hash22(ip + idI);
+        t01 = normalize(pI - pointCenter).yx * vec2(-1.0, 1.0);
+        startID = curID;
+        vec2 currEdgePoint = edgePoint;
+        
+        for(int i = 1; i < totN; i++){
+            int nextID = (startID + i) % totN;
+            vec2 id2 = offsID + neighbor[nextID];
+            vec2 p2 = id2 + hash22(ip + id2);
+            vec2 t02 = normalize(p2 - pointCenter).yx * vec2(-1.0, 1.0) * 8.0;
+            vec2 m02 = mix(pointCenter, p2, 0.5);
+            float t = lineIntersect(currEdgePoint, t01, m02 - t02, m02 + t02);
+            if(t > 1e-5 && t < minDist){
+                minDist = t;
+                edgePoint = currEdgePoint + t * t01;
+                curID = nextID;
+            }
+        }
+        
+        pointList[edgeNum] = pI;
+        edgePointList[edgeNum] = edgePoint;
+        edgeNum++;
+        if(length(startPoint - edgePoint) < 0.0001) break;
+    }
+    
+    // Acute Corner Detection
+    float isAcute[16];
+    for(int i = 0; i < edgeNum; i++){
+        vec2 prev = edgePointList[(i - 1 + edgeNum) % edgeNum];
+        vec2 curr = edgePointList[i];
+        vec2 next = edgePointList[(i + 1) % edgeNum];
+        
+        vec2 U = prev - curr; // Vector to previous vertex
+        vec2 V = next - curr; // Vector to next vertex
+        
+        // Fixed acute detection: flag as 1.0 if dot product is positive.
+        isAcute[i] = (dot(U, V) > 0.0) ? 1.0 : 0.0; 
+    }
+    
+    // Rendering Setup
+    float sf = 5.0 / iResolution.y;      // Smoothing factor
+    float lineWidth = 0.009;             // Line width
+    float pointRadius = 0.08;            // Point radius
+    
+    // Distance to closest edge (for half-edge coloring)
+    float minLn = 1e5;
+    float closestT = 0.0;
+    int closestI = 0;
+    for(int i = 0; i < edgeNum; i++){
+        int ip1 = (i + 1) % edgeNum;
+        vec2 a = edgePointList[i];
+        vec2 b = edgePointList[ip1];
+        vec2 ba = b - a;
+        float h = clamp(dot(p - a, ba) / dot(ba, ba), 0.0, 1.0);
+        float d = length(p - (a + h * ba));
+        if(d < minLn){
+            minLn = d;
+            closestT = h;
+            closestI = i;
+        }
+    }
+    
+    // Distance to centroid-to-midpoint connections
+    float lnConn = 1e5;
+    vec3 connColor = vec3(0.5); // Default medium grey
+    for(int i = 0; i < edgeNum; i++){
+        int ip1 = (i + 1) % edgeNum;
+        vec2 midPoint = mix(edgePointList[i], edgePointList[ip1], 0.5);
+        float dConn = distLine(p, pointCenter, midPoint);
+        if(dConn < lnConn){
+            lnConn = dConn;
+            // Use blue if either adjacent corner is acute
+            if(isAcute[i] > 0.5 || isAcute[ip1] > 0.5){
+                connColor = vec3(0.0, 0.533, 0.941);
+            } else {
+                connColor = vec3(0.03);
+            }
+        }
+    }
+    
+    // Background
+    vec3 col = vec3(0.008); // Very dark grey background
+    
+    // Voronoi edges with acute corner highlighting (closest edge only)
+    vec3 edgeColor;
+    if((closestT < 0.5 && isAcute[closestI] > 0.5) || 
+       (closestT > 0.5 && isAcute[(closestI + 1) % edgeNum] > 0.5))
+    {
+        edgeColor = vec3(1.0, 0.0, 0.0); // Red for acute corner edge halves
+    } else {
+        edgeColor = vec3(0.125);         // Light grey for regular edges
+    }
+    col = mix(col, edgeColor, 1.0 - smoothstep(0.0, sf, minLn - lineWidth * 0.5));
+    
+    // Centroid-to-midpoint connections
+    col = mix(col, connColor, 1.0 - smoothstep(0.0, sf, lnConn - lineWidth * 0.5));
+    
+    // --- Centroid rendering with border ---
+    float borderThickness = 0.06; // Adjust for thicker border if desired
+    float dCent = length(p - pointCenter);
+    float circleOuter = 1.0 - smoothstep(pointRadius + borderThickness - sf, pointRadius + borderThickness + sf, dCent);
+    float circleInner = 1.0 - smoothstep(pointRadius - borderThickness - sf, pointRadius - borderThickness + sf, dCent);
+    float borderMask = circleOuter - circleInner;
+    col = mix(col, vec3(0.008), borderMask);          // Overlay border with background color
+    col = mix(col, vec3(0.0, 1.0, 0.0), circleInner);   // Fill inner circle with green
+    // --- End Centroid rendering ---
+    
+    return col;
+}
+
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+    // --- Read zoomFactor from Buffer A (provided as iChannel0) ---
+    float zoomFactor = texture(iChannel0, vec2(0.5, 0.5)).x;
+    if(zoomFactor <= 0.0) zoomFactor = 1.0;
+
+    // --- Map fragCoord to world coordinates using zoomFactor ---
+    vec2 uv = (fragCoord - 0.5 * iResolution.xy) / iResolution.y;
+    vec2 p = uv * (8.0 * zoomFactor) + iTime / 2.0;
+
+    // --- Compute color using the Voronoi function ---
+    vec3 col = Voronoi(p);
+    
+    // --- Apply a vignette effect ---
+    vec2 uv2 = (fragCoord - 0.5 * iResolution.xy) / iResolution.y;
+    uv2 = abs(uv2) - (vec2(iResolution.x / iResolution.y, 1.0) / 2.0 - 0.075) + 0.05;
+    float vig = min(max(uv2.x, uv2.y), 0.0) + length(max(uv2, vec2(0.0))) - 0.05;
+    col *= 1.0 - smoothstep(0.0, 0.15, vig);
+    
+    fragColor = vec4(sqrt(max(col, vec3(0.0))), 1.0);
+}
