@@ -1,0 +1,14 @@
+float pee(vec2 uv)
+{
+    float round_amount = (sin((iTime + 2000.) / 5000.) + 1.) / 50.;
+    uv = vec2(round(uv.x / round_amount) * round_amount, round(uv.y / round_amount) * round_amount);
+    float one = sin(uv.x * 115544.);
+    float two = sin(uv.y * 115544.1);
+    return step(one, two);
+}
+
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+    vec2 uv = fragCoord/iResolution.xy;
+    fragColor = vec4(pee(uv));
+}
